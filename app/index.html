@@ -1,0 +1,214 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pencatat Keuangan</title>
+<style>
+  :root {
+    --bg: #f4f6f9; --card: #ffffff; --text: #1d2433; --muted: #6b7385;
+    --line: #e4e8ef; --accent: #2563eb; --green: #15803d; --red: #b91c1c;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #11141b; --card: #1a1f2b; --text: #e8ebf2; --muted: #98a0b3;
+      --line: #2a3142; --accent: #5b8def; --green: #4ade80; --red: #f87171;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  .wrap { max-width: 760px; margin: 0 auto; padding: 24px 16px 48px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 28px 0 12px; }
+  .sub { color: var(--muted); font-size: 14px; margin-bottom: 20px; }
+  .card {
+    background: var(--card); border: 1px solid var(--line);
+    border-radius: 12px; padding: 16px;
+  }
+  .total .label { color: var(--muted); font-size: 13px; }
+  .total .angka { font-size: 30px; font-weight: 700; margin-top: 4px; }
+  .grid {
+    display: grid; gap: 12px; margin-top: 12px;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  }
+  .akun .nama { font-weight: 600; }
+  .akun .tipe { color: var(--muted); font-size: 12px; margin-bottom: 8px; }
+  .akun .saldo { font-size: 20px; font-weight: 700; }
+  .row { display: flex; gap: 8px; }
+  input, select, button {
+    font: inherit; padding: 10px 12px; border-radius: 8px;
+    border: 1px solid var(--line); background: var(--card); color: var(--text);
+  }
+  input { flex: 1; min-width: 0; }
+  button {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+    cursor: pointer; font-weight: 600;
+  }
+  button:hover { opacity: .9; }
+  .pesan { margin-top: 10px; font-size: 14px; min-height: 20px; }
+  .ok { color: var(--green); } .err { color: var(--red); }
+  .contoh { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  .item {
+    display: flex; justify-content: space-between; gap: 12px;
+    padding: 12px 0; border-bottom: 1px solid var(--line);
+  }
+  .item:last-child { border-bottom: none; }
+  .item .kiri { min-width: 0; }
+  .item .judul { font-weight: 600; }
+  .item .meta { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+  .item .nominal { font-weight: 700; white-space: nowrap; }
+  .masuk { color: var(--green); } .keluar { color: var(--red); }
+  .kosong { color: var(--muted); padding: 8px 0; }
+  .tambah { display: grid; gap: 8px; grid-template-columns: 2fr 1fr 2fr auto; }
+  @media (max-width: 560px) { .tambah { grid-template-columns: 1fr 1fr; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Pencatat Keuangan</h1>
+  <div class="sub">Ketik catatan seperti biasa, saldo tiap bank terhitung otomatis.</div>
+
+  <div class="card total">
+    <div class="label">Total semua akun</div>
+    <div class="angka" id="total">Rp0</div>
+  </div>
+  <div class="grid" id="daftarAkun"></div>
+
+  <h2>Catat transaksi</h2>
+  <div class="card">
+    <form id="formCatat" class="row">
+      <input id="teks" placeholder="makan siang 25rb pakai bca" autocomplete="off" required>
+      <button type="submit">Catat</button>
+    </form>
+    <div class="pesan" id="pesanCatat"></div>
+    <div class="contoh">
+      Contoh: "gaji masuk 5jt ke bca" &middot; "transfer 100rb dari bca ke gopay" &middot; "isi bensin 50.000 bca"
+    </div>
+  </div>
+
+  <h2>Tambah akun</h2>
+  <div class="card">
+    <form id="formAkun" class="tambah">
+      <input id="aNama" placeholder="Nama (mis. Mandiri)" required>
+      <select id="aTipe">
+        <option value="bank">Bank</option>
+        <option value="ewallet">E-wallet</option>
+        <option value="tunai">Tunai</option>
+      </select>
+      <input id="aSaldo" type="number" min="0" placeholder="Saldo awal (Rp)" value="0">
+      <button type="submit">Tambah</button>
+    </form>
+    <div class="pesan" id="pesanAkun"></div>
+  </div>
+
+  <h2>Riwayat terakhir</h2>
+  <div class="card" id="riwayat"></div>
+</div>
+
+<script>
+const rp = n => "Rp" + new Intl.NumberFormat("id-ID").format(n);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => (
+  {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]
+));
+
+async function api(url, opts) {
+  const r = await fetch(url, opts);
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) {
+    throw new Error(typeof data.detail === "string" ? data.detail : "Data tidak valid");
+  }
+  return data;
+}
+
+function tampilPesan(id, teks, ok) {
+  const el = document.getElementById(id);
+  el.textContent = teks;
+  el.className = "pesan " + (ok ? "ok" : "err");
+}
+
+async function muat() {
+  const [dataAkun, riwayat] = await Promise.all([
+    api("/akun"),
+    api("/transaksi?limit=30"),
+  ]);
+
+  document.getElementById("total").textContent = rp(dataAkun.total);
+
+  const namaById = {};
+  dataAkun.akun.forEach(a => namaById[a.id] = a.nama);
+
+  const boxAkun = document.getElementById("daftarAkun");
+  boxAkun.innerHTML = dataAkun.akun.length
+    ? dataAkun.akun.map(a => `
+        <div class="card akun">
+          <div class="nama">${esc(a.nama)}</div>
+          <div class="tipe">${esc(a.tipe)}</div>
+          <div class="saldo">${rp(a.saldo)}</div>
+        </div>`).join("")
+    : `<div class="kosong">Belum ada akun. Tambahkan lewat formulir di bawah.</div>`;
+
+  const boxRiwayat = document.getElementById("riwayat");
+  boxRiwayat.innerHTML = riwayat.length
+    ? riwayat.map(t => {
+        const tanda = t.tipe === "pemasukan" ? "+" : t.tipe === "pengeluaran" ? "-" : "";
+        const warna = t.tipe === "pemasukan" ? "masuk" : t.tipe === "pengeluaran" ? "keluar" : "";
+        const akun = t.tipe === "transfer"
+          ? `${esc(namaById[t.account_id])} &rarr; ${esc(namaById[t.to_account_id])}`
+          : esc(namaById[t.account_id]);
+        return `
+        <div class="item">
+          <div class="kiri">
+            <div class="judul">${esc(t.kategori || t.tipe)}</div>
+            <div class="meta">${akun} &middot; ${esc(t.tanggal)}${t.catatan ? " &middot; " + esc(t.catatan) : ""}</div>
+          </div>
+          <div class="nominal ${warna}">${tanda}${rp(t.nominal)}</div>
+        </div>`;
+      }).join("")
+    : `<div class="kosong">Belum ada transaksi.</div>`;
+}
+
+document.getElementById("formCatat").addEventListener("submit", async e => {
+  e.preventDefault();
+  const input = document.getElementById("teks");
+  try {
+    const hasil = await api("/catat", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ teks: input.value }),
+    });
+    const t = hasil.tercatat;
+    tampilPesan("pesanCatat", `Tercatat: ${t.tipe} ${rp(t.nominal)} (${t.akun})`, true);
+    input.value = "";
+    muat();
+  } catch (err) {
+    tampilPesan("pesanCatat", err.message, false);
+  }
+});
+
+document.getElementById("formAkun").addEventListener("submit", async e => {
+  e.preventDefault();
+  try {
+    await api("/akun", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        nama: document.getElementById("aNama").value.trim(),
+        tipe: document.getElementById("aTipe").value,
+        saldo_awal: parseInt(document.getElementById("aSaldo").value || "0", 10),
+      }),
+    });
+    tampilPesan("pesanAkun", "Akun ditambahkan.", true);
+    e.target.reset();
+    muat();
+  } catch (err) {
+    tampilPesan("pesanAkun", err.message, false);
+  }
+});
+
+muat().catch(err => tampilPesan("pesanCatat", err.message, false));
+</script>
+</body>
+</html>

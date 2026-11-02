@@ -5,6 +5,9 @@ from pydantic import BaseModel, Field
 
 from .db import get_conn, hitung_saldo, init_db
 from .parser import parse_pesan
+from pathlib import Path
+
+from fastapi.responses import FileResponse
 
 app = FastAPI(title="Pencatat Keuangan")
 init_db()
@@ -109,3 +112,7 @@ def catat(p: PesanIn):
         raise HTTPException(422, f"Hasil parser tidak valid: {hasil}")
 
     return {"tercatat": hasil, **tambah_transaksi(t)}
+
+@app.get("/", include_in_schema=False)
+def halaman_utama():
+    return FileResponse(Path(__file__).parent / "index.html")
