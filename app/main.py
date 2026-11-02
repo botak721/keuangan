@@ -4,6 +4,7 @@ from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
 
 from .db import get_conn, hitung_saldo, init_db
+from .parser import parse_pesan
 
 app = FastAPI(title="Pencatat Keuangan")
 init_db()
@@ -77,3 +78,34 @@ def riwayat(limit: int = 50):
             "SELECT * FROM transactions ORDER BY id DESC LIMIT ?", (limit,)
         ).fetchall()
     return [dict(r) for r in rows]
+
+
+class PesanIn(BaseModel):
+    teks: str
+
+
+@app.post("/catat")
+def catat(p: PesanIn):
+    with get_conn() as conn:
+        nama_akun = [r["nama"] for r in conn.execute("SELECT nama FROM accounts")]
+    if not nama_akun:
+        raise HTTPException(400, "Belum ada akun. Buat dulu lewat POST /akun")
+
+    try:
+        hasil = parse_pesan(p.teks, nama_akun)
+    except Exception as e:
+        raise HTTPException(502, f"Gagal mengurai pesan: {e}")
+
+    if "error" in hasil:
+        raise HTTPException(422, hasil["error"])
+    if not hasil.get("akun"):
+        raise HTTPException(
+            422, f"Akun tidak disebutkan. Pilih salah satu: {', '.join(nama_akun)}"
+        )
+
+    try:
+        t = TransaksiIn(**hasil)
+    except Exception:
+        raise HTTPException(422, f"Hasil parser tidak valid: {hasil}")
+
+    return {"tercatat": hasil, **tambah_transaksi(t)}
